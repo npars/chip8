@@ -1,5 +1,5 @@
-use crate::mmu::Mmu;
-use crate::video::Video;
+use super::mmu::Mmu;
+use super::window::Window;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -7,7 +7,7 @@ use ux::u12;
 
 pub struct Cpu {
     mmu: Rc<RefCell<dyn Mmu>>,
-    video: Rc<RefCell<dyn Video>>,
+    window: Rc<RefCell<dyn Window>>,
     registers: Vec<u8>,
     index: u12,
     program_counter: u12,
@@ -40,10 +40,10 @@ impl Cpu {
         Self::opcode_f,
     ];
 
-    pub fn new(mmu: Rc<RefCell<dyn Mmu>>, video: Rc<RefCell<dyn Video>>) -> Cpu {
+    pub fn new(mmu: Rc<RefCell<dyn Mmu>>, window: Rc<RefCell<dyn Window>>) -> Cpu {
         Cpu {
             mmu,
-            video,
+            window,
             registers: vec![0; Cpu::REGISTER_SIZE],
             index: u12::new(0),
             program_counter: u12::new(0x200),
@@ -74,7 +74,7 @@ impl Cpu {
         match u16::from(data) {
             // Blank Screen
             0x0E0 => {
-                self.video.borrow_mut().blank_screen();
+                self.window.borrow_mut().blank_screen();
                 None
             }
             // Return from subroutine
@@ -245,9 +245,9 @@ impl Cpu {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
+    use super::super::mmu::MockMmu;
+    use super::super::window::MockWindow;
     use super::*;
-    use crate::mmu::MockMmu;
-    use crate::video::MockVideo;
     use rstest::*;
 
     #[fixture]
@@ -256,20 +256,20 @@ mod tests {
     }
 
     #[fixture]
-    fn video() -> Rc<RefCell<MockVideo>> {
-        Rc::new(RefCell::new(MockVideo::new()))
+    fn window() -> Rc<RefCell<MockWindow>> {
+        Rc::new(RefCell::new(MockWindow::new()))
     }
 
     #[rstest]
-    fn pc_has_default(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let cpu = Cpu::new(mmu.clone(), video.clone());
+    fn pc_has_default(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let cpu = Cpu::new(mmu.clone(), window.clone());
         assert_eq!(u12::new(0x200), cpu.program_counter);
     }
 
     #[rstest]
-    fn op_00E0_blanks_screen(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
-        video.borrow_mut().expect_blank_screen().returning(|| ());
+    fn op_00E0_blanks_screen(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        window.borrow_mut().expect_blank_screen().returning(|| ());
 
         cpu.exec_opcode(0x00E0);
 
@@ -277,8 +277,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_00E0_returns_from_subroutine(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_00E0_returns_from_subroutine(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.stack.push_back(u12::new(0x400));
 
         cpu.exec_opcode(0x00EE);
@@ -287,8 +287,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_1NNN_jumps_to_address(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_1NNN_jumps_to_address(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
 
         cpu.exec_opcode(0x1400);
 
@@ -296,8 +296,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_2NNN_calls_subroutine(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_2NNN_calls_subroutine(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
 
         cpu.exec_opcode(0x2400);
 
@@ -306,8 +306,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_3XNN_skips_instruction_if_eq(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_3XNN_skips_instruction_if_eq(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x10;
 
         cpu.exec_opcode(0x3410);
@@ -316,8 +316,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_3XNN_does_not_skip_when_ne(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_3XNN_does_not_skip_when_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x11;
 
         cpu.exec_opcode(0x3410);
@@ -326,8 +326,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_4XNN_skips_instruction_if_ne(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_4XNN_skips_instruction_if_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x11;
 
         cpu.exec_opcode(0x4410);
@@ -336,8 +336,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_4XNN_does_not_skip_when_eq(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_4XNN_does_not_skip_when_eq(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x10;
 
         cpu.exec_opcode(0x4410);
@@ -346,8 +346,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_5XY0_skips_instruction_if_eq(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_5XY0_skips_instruction_if_eq(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x10;
 
@@ -357,8 +357,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_5XY0_does_not_skip_when_ne(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_5XY0_does_not_skip_when_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x11;
 
@@ -368,8 +368,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_6XNN_sets_register(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_6XNN_sets_register(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
 
         cpu.exec_opcode(0x6450);
 
@@ -377,8 +377,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_7XNN_adds_to_register(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_7XNN_adds_to_register(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x02;
 
         cpu.exec_opcode(0x74FF);
@@ -388,8 +388,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY0_sets_register(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY0_sets_register(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[4] = 0x02;
 
         cpu.exec_opcode(0x8140);
@@ -398,8 +398,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY1_does_or(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY1_does_or(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -409,8 +409,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY2_does_and(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY2_does_and(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -420,8 +420,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY3_does_xor(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY3_does_xor(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -431,8 +431,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY4_does_add(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY4_does_add(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x04;
         cpu.registers[4] = 0x03;
@@ -444,8 +444,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY4_does_add_with_carry(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY4_does_add_with_carry(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0xFF;
         cpu.registers[4] = 0x03;
 
@@ -456,8 +456,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY5_does_sub(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY5_does_sub(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0x05;
         cpu.registers[4] = 0x03;
 
@@ -468,8 +468,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY5_does_sub_with_carry(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY5_does_sub_with_carry(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x01;
         cpu.registers[4] = 0x02;
@@ -481,8 +481,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY6_does_right_shift(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY6_does_right_shift(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0b0101;
 
         cpu.exec_opcode(0x8146);
@@ -492,8 +492,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY7_does_reverse_sub(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XY7_does_reverse_sub(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0x03;
         cpu.registers[4] = 0x05;
 
@@ -505,10 +505,10 @@ mod tests {
 
     #[rstest]
     fn op_8XY7_does_reverse_sub_with_carry(
-        video: Rc<RefCell<MockVideo>>,
+        window: Rc<RefCell<MockWindow>>,
         mmu: Rc<RefCell<MockMmu>>,
     ) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x02;
         cpu.registers[4] = 0x01;
@@ -520,8 +520,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XYE_does_left_shift(video: Rc<RefCell<MockVideo>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), video.clone());
+    fn op_8XYE_does_left_shift(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
         cpu.registers[1] = 0b1000_0010;
 
         cpu.exec_opcode(0x814E);

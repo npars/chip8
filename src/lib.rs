@@ -1,3 +1,3 @@
 mod cpu;
 mod mmu;
-mod video;
+mod window;
