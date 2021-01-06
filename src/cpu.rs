@@ -1,5 +1,6 @@
 use super::mmu::Mmu;
 use super::window::Window;
+use crate::mmu::Chip8Mmu;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -54,7 +55,7 @@ impl Cpu {
     }
 
     pub fn run_cycle(&mut self) {
-        let opcode = self.mmu.borrow().read_u16(self.program_counter);
+        let opcode = self.mmu.as_ref().borrow().read_u16(self.program_counter);
         self.exec_opcode(opcode);
     }
 
@@ -130,10 +131,8 @@ impl Cpu {
 
     fn opcode_5(&mut self, data: u12) -> Option<u12> {
         // Skips the next instruction if VX equals VY
-        let data = u16::from(data);
-        let reg_x_index = ((data & 0xF00) >> 8) as usize;
-        let reg_y_index = ((data & 0x0F0) >> 4) as usize;
-        if self.registers[reg_x_index as usize] == self.registers[reg_y_index as usize] {
+        let (x, y, _) = Self::split_xyn(data);
+        if self.registers[x as usize] == self.registers[y as usize] {
             Some(
                 self.program_counter
                     .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
@@ -205,25 +204,126 @@ impl Cpu {
     }
 
     fn opcode_9(&mut self, data: u12) -> Option<u12> {
-        None
+        // Skips the next instruction if VX doesn't equal VY.
+        let (x, y, _) = Self::split_xyn(data);
+        if self.registers[x as usize] != self.registers[y as usize] {
+            Some(
+                self.program_counter
+                    .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+            )
+        } else {
+            None
+        }
     }
 
     fn opcode_a(&mut self, data: u12) -> Option<u12> {
+        // Sets I to the address NNN
+        self.index = data;
         None
     }
+
     fn opcode_b(&mut self, data: u12) -> Option<u12> {
-        None
+        // Jumps to the address NNN plus V0.
+        Some(u12::from(self.registers[0]).wrapping_add(data))
     }
+
     fn opcode_c(&mut self, data: u12) -> Option<u12> {
+        // Sets VX to the result of a bitwise and operation on a random number and NN.
+        let (register_index, bitmask) = Self::split_xnn(data);
+        self.registers[register_index as usize] = fastrand::u8(..) & bitmask;
         None
     }
+
     fn opcode_d(&mut self, data: u12) -> Option<u12> {
+        // Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N+1 pixels
+        let (x, y, n) = Self::split_xyn(data);
+        let sprite = (0..(n + 1))
+            .map(|i| {
+                self.mmu
+                    .as_ref()
+                    .borrow()
+                    .read_u8(self.index.wrapping_add(u12::from(i)))
+            })
+            .collect();
+        self.window.as_ref().borrow().draw(x, y, sprite);
         None
     }
+
     fn opcode_e(&mut self, data: u12) -> Option<u12> {
-        None
+        let (x, opcode) = Self::split_xnn(data);
+
+        let is_key_pressed = self
+            .window
+            .as_ref()
+            .borrow()
+            .is_key_pressed(self.registers[x as usize]);
+
+        match opcode {
+            // Skips the next instruction if the key stored in VX is pressed.
+            0x9E => {
+                if is_key_pressed {
+                    Some(
+                        self.program_counter
+                            .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                    )
+                } else {
+                    None
+                }
+            }
+            // Skips the next instruction if the key stored in VX isn't pressed.
+            0xA1 => {
+                if !is_key_pressed {
+                    Some(
+                        self.program_counter
+                            .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                    )
+                } else {
+                    None
+                }
+            }
+            // Unhandled
+            _ => panic!("Unhandled key check operation"),
+        }
     }
+
     fn opcode_f(&mut self, data: u12) -> Option<u12> {
+        let (x, opcode) = Self::split_xnn(data);
+        let x = x as usize;
+
+        match opcode {
+            // Sets VX to the value of the delay timer.
+            0x07 => self.registers[x] = self.delay_timer,
+            // A key press is awaited, and then stored in VX.
+            0x0A => match self.window.as_ref().borrow().get_pressed_key() {
+                Some(key) => self.registers[x] = key,
+                None => return Some(self.program_counter),
+            },
+            // Sets the delay timer to VX.
+            0x15 => self.delay_timer = self.registers[x],
+            // Sets the sound timer to VX.
+            0x18 => self.sound_timer = self.registers[x],
+            // Adds VX to I. VF is not affected.
+            0x1E => self.index = self.index.wrapping_add(u12::from(self.registers[x])),
+            // Sets I to the location of the sprite for the character in VX.
+            0x29 => {
+                self.index =
+                    u12::new((Chip8Mmu::FONT_SPRITE_HEIGHT as u16) * (self.registers[x] as u16))
+            }
+            // Stores the binary-coded decimal representation of VX
+            0x33 => {
+                self.mmu
+                    .borrow_mut()
+                    .write_u8(self.index, self.registers[x] / 100);
+                self.mmu.borrow_mut().write_u8(
+                    self.index.wrapping_add(u12::new(   1)),
+                    (self.registers[x] % 100) / 10,
+                );
+                self.mmu
+                    .borrow_mut()
+                    .write_u8(self.index.wrapping_add(u12::new(2)), self.registers[x] % 10);
+            }
+            _ => panic!("Unhandled register operation"),
+        }
         None
     }
 
@@ -248,6 +348,7 @@ mod tests {
     use super::super::mmu::MockMmu;
     use super::super::window::MockWindow;
     use super::*;
+    use mockall::predicate::eq;
     use rstest::*;
 
     #[fixture]
@@ -528,5 +629,101 @@ mod tests {
 
         assert_eq!(0b0100, cpu.registers[1]);
         assert_eq!(0x01, cpu.registers[Cpu::CARRY_REGISTER]);
+    }
+
+    #[rstest]
+    fn op_9XY0_skips_instruction_if_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[4] = 0x10;
+        cpu.registers[5] = 0x11;
+
+        cpu.exec_opcode(0x9450);
+
+        assert_eq!(u12::new(0x204), cpu.program_counter);
+    }
+
+    #[rstest]
+    fn op_ANNN_sets_index(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+
+        cpu.exec_opcode(0xA123);
+
+        assert_eq!(u12::new(0x123), cpu.index);
+    }
+
+    #[rstest]
+    fn op_BNNN_jumps(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[0] = 0x10;
+
+        cpu.exec_opcode(0xB113);
+
+        assert_eq!(u12::new(0x123), cpu.program_counter);
+    }
+
+    #[rstest]
+    fn op_DXYN_draws_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.index = u12::new(0x010);
+        mmu.borrow_mut()
+            .expect_read_u8()
+            .returning(|x| u16::from(x) as u8);
+        window
+            .borrow_mut()
+            .expect_draw()
+            .with(eq(1), eq(2), eq(vec![0x10]))
+            .returning(|_, _, _| false);
+
+        cpu.exec_opcode(0xD120);
+    }
+
+    #[rstest]
+    fn op_DXYN_draws_non_zero_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.index = u12::new(0x010);
+        mmu.borrow_mut()
+            .expect_read_u8()
+            .times(2)
+            .returning(|x| u16::from(x) as u8);
+        window
+            .borrow_mut()
+            .expect_draw()
+            .with(eq(1), eq(2), eq(vec![0x10, 0x11]))
+            .returning(|_, _, _| false);
+
+        cpu.exec_opcode(0xD121);
+    }
+
+    #[rstest]
+    fn op_EX9E_skips_if_key_pressed(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        window
+            .borrow_mut()
+            .expect_is_key_pressed()
+            .with(eq(0xA))
+            .returning(|_| true);
+        cpu.registers[4] = 0xA;
+
+        cpu.exec_opcode(0xE49E);
+
+        assert_eq!(u12::new(0x204), cpu.program_counter);
+    }
+
+    #[rstest]
+    fn op_EXA1_skips_if_key_not_pressed(
+        window: Rc<RefCell<MockWindow>>,
+        mmu: Rc<RefCell<MockMmu>>,
+    ) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        window
+            .borrow_mut()
+            .expect_is_key_pressed()
+            .with(eq(0xA))
+            .returning(|_| false);
+        cpu.registers[4] = 0xA;
+
+        cpu.exec_opcode(0xE4A1);
+
+        assert_eq!(u12::new(0x204), cpu.program_counter);
     }
 }

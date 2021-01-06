@@ -25,6 +25,8 @@ impl Chip8Mmu {
     const PROGRAM_START: usize = 0x200;
     // Total number of bytes available
     const MEM_SIZE: usize = 4096;
+    // Number of bytes in each font sprite
+    pub const FONT_SPRITE_HEIGHT: u8 = 5;
     // Collection fo characters at a known location
     const FONT_SET: [u8; 80] = [
         0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
