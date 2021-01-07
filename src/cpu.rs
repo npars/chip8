@@ -322,6 +322,24 @@ impl Cpu {
                     .borrow_mut()
                     .write_u8(self.index.wrapping_add(u12::new(2)), self.registers[x] % 10);
             }
+            // Stores V0 to VX (including VX) in memory starting at address I.
+            0x55 => {
+                for i in 0..x {
+                    self.mmu.borrow_mut().write_u8(
+                        self.index.wrapping_add(u12::from(i as u8)),
+                        self.registers[i],
+                    );
+                }
+            }
+            // Fills V0 to VX (including VX) with values from memory starting at address I.
+            0x65 => {
+                for i in 0..x {
+                    self.registers[i] = self
+                        .mmu
+                        .borrow()
+                        .read_u8(self.index.wrapping_add(u12::from(i as u8)));
+                }
+            }
             _ => panic!("Unhandled register operation"),
         }
         None
@@ -825,5 +843,39 @@ mod tests {
             .returning(|_, _| ());
 
         cpu.exec_opcode(0xF433);
+    }
+
+    #[rstest]
+    fn op_FX55_dumps_registers(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.index = u12::new(0x100);
+        cpu.registers[0] = 0x10;
+        cpu.registers[1] = 0x23;
+
+        mmu.borrow_mut()
+            .expect_write_u8()
+            .with(eq(u12::new(0x100)), eq(0x10))
+            .returning(|_, _| ());
+        mmu.borrow_mut()
+            .expect_write_u8()
+            .with(eq(u12::new(0x101)), eq(0x23))
+            .returning(|_, _| ());
+
+        cpu.exec_opcode(0xF155);
+    }
+
+    #[rstest]
+    fn op_FX55_loads_registers(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.index = u12::new(0x100);
+
+        mmu.borrow_mut()
+            .expect_read_u8()
+            .with(eq(u12::new(0x100)))
+            .return_const(7);
+
+        cpu.exec_opcode(0xF165);
+
+        assert_eq!(7, cpu.registers[0]);
     }
 }
