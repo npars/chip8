@@ -315,7 +315,7 @@ impl Cpu {
                     .borrow_mut()
                     .write_u8(self.index, self.registers[x] / 100);
                 self.mmu.borrow_mut().write_u8(
-                    self.index.wrapping_add(u12::new(   1)),
+                    self.index.wrapping_add(u12::new(1)),
                     (self.registers[x] % 100) / 10,
                 );
                 self.mmu
@@ -725,5 +725,105 @@ mod tests {
         cpu.exec_opcode(0xE4A1);
 
         assert_eq!(u12::new(0x204), cpu.program_counter);
+    }
+
+    #[rstest]
+    fn op_FX07_sets_vx_to_delay(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.delay_timer = 0xA1;
+
+        cpu.exec_opcode(0xF407);
+
+        assert_eq!(0xA1, cpu.registers[4]);
+    }
+
+    #[rstest]
+    fn op_FX0A_sets_vx_to_key(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        window
+            .borrow_mut()
+            .expect_get_pressed_key()
+            .returning(|| Some(0x8));
+
+        cpu.exec_opcode(0xF40A);
+
+        assert_eq!(0x8, cpu.registers[4]);
+        assert_eq!(u12::new(0x202), cpu.program_counter);
+    }
+
+    #[rstest]
+    fn op_FX0A_blocks_when_no_key(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        window
+            .borrow_mut()
+            .expect_get_pressed_key()
+            .returning(|| None);
+
+        cpu.exec_opcode(0xF40A);
+
+        assert_eq!(u12::new(0x200), cpu.program_counter);
+    }
+
+    #[rstest]
+    fn op_FX15_sets_delay(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[4] = 0xA2;
+
+        cpu.exec_opcode(0xF415);
+
+        assert_eq!(0xA2, cpu.delay_timer);
+    }
+
+    #[rstest]
+    fn op_FX15_sets_sound(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[4] = 0xA3;
+
+        cpu.exec_opcode(0xF418);
+
+        assert_eq!(0xA3, cpu.sound_timer);
+    }
+
+    #[rstest]
+    fn op_FX1E_increments_index(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.index = u12::new(0xA00);
+        cpu.registers[4] = 0xFF;
+
+        cpu.exec_opcode(0xF41E);
+
+        assert_eq!(u12::new(0xAFF), cpu.index);
+    }
+
+    #[rstest]
+    fn op_FX29_sets_index_to_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[4] = 0xB;
+
+        cpu.exec_opcode(0xF429);
+
+        assert_eq!(u12::new(55), cpu.index);
+    }
+
+    #[rstest]
+    fn op_FX33_writes_bcd(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
+        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.index = u12::new(0x100);
+        cpu.registers[4] = 213;
+
+        mmu.borrow_mut()
+            .expect_write_u8()
+            .with(eq(u12::new(0x100)), eq(2))
+            .returning(|_, _| ());
+        mmu.borrow_mut()
+            .expect_write_u8()
+            .with(eq(u12::new(0x101)), eq(1))
+            .returning(|_, _| ());
+        mmu.borrow_mut()
+            .expect_write_u8()
+            .with(eq(u12::new(0x102)), eq(3))
+            .returning(|_, _| ());
+
+        cpu.exec_opcode(0xF433);
     }
 }
