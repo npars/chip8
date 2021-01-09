@@ -256,11 +256,11 @@ impl Cpu {
                     .read_u8(self.index.wrapping_add(u12::from(i)))
             })
             .collect();
-        self.window.borrow_mut().draw(
+        self.registers[Self::CARRY_REGISTER] = self.window.borrow_mut().draw(
             self.registers[x as usize],
             self.registers[y as usize],
             sprite,
-        );
+        ) as u8;
         None
     }
 
@@ -707,9 +707,11 @@ mod tests {
             .borrow_mut()
             .expect_draw()
             .with(eq(7), eq(8), eq(vec![0x10]))
-            .returning(|_, _, _| false);
+            .returning(|_, _, _| true);
 
-        cpu.exec_opcode(0xD320);
+        cpu.exec_opcode(0xD321);
+
+        assert_eq!(0x1, cpu.registers[0xF])
     }
 
     #[rstest]
@@ -728,7 +730,8 @@ mod tests {
             .with(eq(7), eq(8), eq(vec![0x10, 0x11]))
             .returning(|_, _, _| false);
 
-        cpu.exec_opcode(0xD321);
+        cpu.exec_opcode(0xD322);
+        assert_eq!(0x0, cpu.registers[0xF])
     }
 
     #[rstest]
