@@ -255,7 +255,7 @@ impl Cpu {
                     .read_u8(self.index.wrapping_add(u12::from(i)))
             })
             .collect();
-        self.window.as_ref().borrow().draw(x, y, sprite);
+        self.window.borrow_mut().draw(x, y, sprite);
         None
     }
 

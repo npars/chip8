@@ -2,6 +2,7 @@ mod cpu;
 mod mmu;
 mod window;
 
+use crate::window::Window;
 use mmu::Mmu;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -23,6 +24,7 @@ pub async fn run(frequency: u32, file_path: &str) {
         if (now - last_60hz_tick) >= duration_60hz {
             last_60hz_tick += duration_60hz;
             cpu.run_60hz_cycle();
+            window.borrow_mut().render();
         }
 
         cpu.run_cycle()
