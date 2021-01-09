@@ -59,6 +59,16 @@ impl Cpu {
         self.exec_opcode(opcode);
     }
 
+    pub fn run_60hz_cycle(&mut self) {
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+        }
+
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+    }
+
     fn exec_opcode(&mut self, opcode: u16) {
         // Run the opcode, then update the program_counter
         match Cpu::FUNC_MAP[(opcode >> 12) as usize](self, u12::new(opcode & 0xFFF)) {
