@@ -46,7 +46,7 @@ impl MiniFbWindow {
         )
         .expect("Unable to open Window");
         window.update();
-        let buffer = vec![0; Self::WIDTH * Self::HEIGHT];
+        let buffer = vec![0; Self::BUFFER_SIZE];
         MiniFbWindow {
             window,
             buffer,
