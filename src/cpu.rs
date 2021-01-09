@@ -247,7 +247,8 @@ impl Cpu {
     fn opcode_d(&mut self, data: u12) -> Option<u12> {
         // Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N+1 pixels
         let (x, y, n) = Self::split_xyn(data);
-        let sprite = (0..(n + 1))
+
+        let sprite = (0..=n)
             .map(|i| {
                 self.mmu
                     .as_ref()
@@ -255,7 +256,11 @@ impl Cpu {
                     .read_u8(self.index.wrapping_add(u12::from(i)))
             })
             .collect();
-        self.window.borrow_mut().draw(x, y, sprite);
+        self.window.borrow_mut().draw(
+            self.registers[x as usize],
+            self.registers[y as usize],
+            sprite,
+        );
         None
     }
 
@@ -334,7 +339,7 @@ impl Cpu {
             }
             // Stores V0 to VX (including VX) in memory starting at address I.
             0x55 => {
-                for i in 0..x {
+                for i in 0..=x {
                     self.mmu.borrow_mut().write_u8(
                         self.index.wrapping_add(u12::from(i as u8)),
                         self.registers[i],
@@ -343,7 +348,7 @@ impl Cpu {
             }
             // Fills V0 to VX (including VX) with values from memory starting at address I.
             0x65 => {
-                for i in 0..x {
+                for i in 0..=x {
                     self.registers[i] = self
                         .mmu
                         .borrow()
@@ -692,6 +697,8 @@ mod tests {
     #[rstest]
     fn op_DXYN_draws_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
         let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[3] = 7;
+        cpu.registers[2] = 8;
         cpu.index = u12::new(0x010);
         mmu.borrow_mut()
             .expect_read_u8()
@@ -699,15 +706,17 @@ mod tests {
         window
             .borrow_mut()
             .expect_draw()
-            .with(eq(1), eq(2), eq(vec![0x10]))
+            .with(eq(7), eq(8), eq(vec![0x10]))
             .returning(|_, _, _| false);
 
-        cpu.exec_opcode(0xD120);
+        cpu.exec_opcode(0xD320);
     }
 
     #[rstest]
     fn op_DXYN_draws_non_zero_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
         let mut cpu = Cpu::new(mmu.clone(), window.clone());
+        cpu.registers[3] = 7;
+        cpu.registers[2] = 8;
         cpu.index = u12::new(0x010);
         mmu.borrow_mut()
             .expect_read_u8()
@@ -716,10 +725,10 @@ mod tests {
         window
             .borrow_mut()
             .expect_draw()
-            .with(eq(1), eq(2), eq(vec![0x10, 0x11]))
+            .with(eq(7), eq(8), eq(vec![0x10, 0x11]))
             .returning(|_, _, _| false);
 
-        cpu.exec_opcode(0xD121);
+        cpu.exec_opcode(0xD321);
     }
 
     #[rstest]
@@ -884,8 +893,14 @@ mod tests {
             .with(eq(u12::new(0x100)))
             .return_const(7);
 
+        mmu.borrow_mut()
+            .expect_read_u8()
+            .with(eq(u12::new(0x101)))
+            .return_const(8);
+
         cpu.exec_opcode(0xF165);
 
         assert_eq!(7, cpu.registers[0]);
+        assert_eq!(8, cpu.registers[1]);
     }
 }

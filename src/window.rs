@@ -19,6 +19,7 @@ pub trait Window {
 pub struct MiniFbWindow {
     window: minifb::Window,
     buffer: Vec<u32>,
+    is_dirty: bool,
 }
 
 impl MiniFbWindow {
@@ -46,7 +47,11 @@ impl MiniFbWindow {
         .expect("Unable to open Window");
         window.update();
         let buffer = vec![0; Self::WIDTH * Self::HEIGHT];
-        MiniFbWindow { window, buffer }
+        MiniFbWindow {
+            window,
+            buffer,
+            is_dirty: false,
+        }
     }
 }
 
@@ -55,34 +60,43 @@ impl Window for MiniFbWindow {
         for i in 0..Self::BUFFER_SIZE {
             self.buffer[i] = Self::PIXEL_LO;
         }
+        self.is_dirty = true;
     }
 
     fn draw(&mut self, x: u8, y: u8, sprite: Vec<u8>) -> bool {
-        println!("x:{:?}, y:{:?}", x, y);
         let (x, y) = (x as usize, y as usize);
         let mut collision = false;
         for (y_offset, row) in sprite.iter().enumerate() {
             for x_offset in 0..Self::SPRITE_WIDTH {
+                if (x_offset + x) >= Self::WIDTH || (y_offset + y) >= Self::HEIGHT {
+                    continue;
+                }
+
                 let pixel =
                     Self::PIXEL_MAP[((row >> (Self::SPRITE_WIDTH - x_offset - 1)) & 0x1) as usize];
                 let pixel_index = (x + x_offset + ((y + y_offset) * Self::WIDTH)) as usize;
-                if pixel == self.buffer[pixel_index] {
+                if pixel == Self::PIXEL_HI {
                     if self.buffer[pixel_index] == Self::PIXEL_HI {
+                        self.buffer[pixel_index] = Self::PIXEL_LO;
                         collision = true;
+                    } else {
+                        self.buffer[pixel_index] = Self::PIXEL_HI;
                     }
-                    self.buffer[pixel_index] = Self::PIXEL_LO;
-                } else {
-                    self.buffer[pixel_index] = Self::PIXEL_HI;
                 }
             }
         }
+        self.is_dirty = true;
         collision
     }
 
     fn render(&mut self) {
-        self.window
-            .update_with_buffer(&self.buffer, Self::WIDTH, Self::HEIGHT)
-            .expect("Failed to update window");
+        if self.is_dirty {
+            self.window
+                .update_with_buffer(&self.buffer, Self::WIDTH, Self::HEIGHT)
+                .expect("Failed to update window");
+        } else {
+            self.window.update();
+        }
     }
 
     fn is_key_pressed(&self, _key: u8) -> bool {
