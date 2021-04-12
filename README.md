@@ -7,4 +7,4 @@ A Chip-8 interpreter written in Rust.
 - [x] Implement Instruction Set
 - [x] Video output
 - [x] Keyboard input
-- [ ] Audio output
+- [x] Audio output

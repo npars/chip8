@@ -1,3 +1,4 @@
+mod audio;
 mod cpu;
 mod mmu;
 mod window;
@@ -11,7 +12,9 @@ pub async fn run(frequency: u32, file_path: &str) {
     let mut mmu = Box::new(mmu::Chip8Mmu::new());
     mmu.load_program(file_path).unwrap();
     let window = Box::new(window::MiniFbWindow::new());
-    let mut cpu = cpu::Cpu::new(mmu, window);
+    let audio = Box::new(audio::Chip8Audio::new().expect("Failed to initialize audio"));
+
+    let mut cpu = cpu::Cpu::new(mmu, window, audio);
 
     let mut last_60hz_tick = Instant::now();
     let mut interval = time::interval(Duration::from_secs_f64(1f64 / (frequency as f64)));

@@ -1,3 +1,4 @@
+use super::audio::Audio;
 use super::mmu::Mmu;
 use super::window::Window;
 use crate::mmu::Chip8Mmu;
@@ -7,6 +8,7 @@ use ux::u12;
 pub struct Cpu {
     mmu: Box<dyn Mmu>,
     window: Box<dyn Window>,
+    audio: Box<dyn Audio>,
     registers: Vec<u8>,
     index: u12,
     program_counter: u12,
@@ -39,10 +41,11 @@ impl Cpu {
         Self::opcode_f,
     ];
 
-    pub fn new(mmu: Box<dyn Mmu>, window: Box<dyn Window>) -> Cpu {
+    pub fn new(mmu: Box<dyn Mmu>, window: Box<dyn Window>, audio: Box<dyn Audio>) -> Cpu {
         Cpu {
             mmu,
             window,
+            audio,
             registers: vec![0; Cpu::REGISTER_SIZE],
             index: u12::new(0),
             program_counter: u12::new(0x200),
@@ -59,7 +62,10 @@ impl Cpu {
 
     pub fn run_60hz_cycle(&mut self) {
         if self.sound_timer > 0 {
+            self.audio.play();
             self.sound_timer -= 1;
+        } else {
+            self.audio.pause();
         }
 
         if self.delay_timer > 0 {
@@ -365,6 +371,7 @@ impl Cpu {
 #[cfg(test)]
 #[allow(non_snake_case)]
 mod tests {
+    use super::super::audio::MockAudio;
     use super::super::mmu::MockMmu;
     use super::super::window::MockWindow;
     use super::*;
@@ -381,16 +388,25 @@ mod tests {
         Box::new(MockWindow::new())
     }
 
+    #[fixture]
+    fn audio() -> Box<MockAudio> {
+        Box::new(MockAudio::new())
+    }
+
     #[rstest]
-    fn pc_has_default(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let cpu = Cpu::new(mmu, window);
+    fn pc_has_default(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let cpu = Cpu::new(mmu, window, audio);
         assert_eq!(u12::new(0x200), cpu.program_counter);
     }
 
     #[rstest]
-    fn op_00E0_blanks_screen(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+    fn op_00E0_blanks_screen(
+        mut window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         window.expect_blank_screen().returning(|| ());
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0x00E0);
 
@@ -398,8 +414,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_00E0_returns_from_subroutine(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_00E0_returns_from_subroutine(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.stack.push_back(u12::new(0x400));
 
         cpu.exec_opcode(0x00EE);
@@ -408,8 +428,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_1NNN_jumps_to_address(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_1NNN_jumps_to_address(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0x1400);
 
@@ -417,8 +437,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_2NNN_calls_subroutine(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_2NNN_calls_subroutine(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0x2400);
 
@@ -427,8 +447,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_3XNN_skips_instruction_if_eq(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_3XNN_skips_instruction_if_eq(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x10;
 
         cpu.exec_opcode(0x3410);
@@ -437,8 +461,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_3XNN_does_not_skip_when_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_3XNN_does_not_skip_when_ne(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x11;
 
         cpu.exec_opcode(0x3410);
@@ -447,8 +475,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_4XNN_skips_instruction_if_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_4XNN_skips_instruction_if_ne(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x11;
 
         cpu.exec_opcode(0x4410);
@@ -457,8 +489,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_4XNN_does_not_skip_when_eq(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_4XNN_does_not_skip_when_eq(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x10;
 
         cpu.exec_opcode(0x4410);
@@ -467,8 +503,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_5XY0_skips_instruction_if_eq(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_5XY0_skips_instruction_if_eq(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x10;
 
@@ -478,8 +518,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_5XY0_does_not_skip_when_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_5XY0_does_not_skip_when_ne(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x11;
 
@@ -489,8 +533,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_6XNN_sets_register(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_6XNN_sets_register(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0x6450);
 
@@ -498,8 +542,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_7XNN_adds_to_register(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_7XNN_adds_to_register(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x02;
 
         cpu.exec_opcode(0x74FF);
@@ -509,8 +553,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY0_sets_register(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY0_sets_register(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x02;
 
         cpu.exec_opcode(0x8140);
@@ -519,8 +563,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY1_does_or(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY1_does_or(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -530,8 +574,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY2_does_and(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY2_does_and(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -541,8 +585,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY3_does_xor(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY3_does_xor(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -552,8 +596,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY4_does_add(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY4_does_add(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x04;
         cpu.registers[4] = 0x03;
@@ -565,8 +609,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY4_does_add_with_carry(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY4_does_add_with_carry(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0xFF;
         cpu.registers[4] = 0x03;
 
@@ -577,8 +625,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY5_does_sub(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY5_does_sub(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0x05;
         cpu.registers[4] = 0x03;
 
@@ -589,8 +637,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY5_does_sub_with_carry(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY5_does_sub_with_carry(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x01;
         cpu.registers[4] = 0x02;
@@ -602,8 +654,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY6_does_right_shift(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY6_does_right_shift(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b0101;
 
         cpu.exec_opcode(0x8146);
@@ -613,8 +665,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY7_does_reverse_sub(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY7_does_reverse_sub(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0x03;
         cpu.registers[4] = 0x05;
 
@@ -625,8 +677,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY7_does_reverse_sub_with_carry(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XY7_does_reverse_sub_with_carry(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x02;
         cpu.registers[4] = 0x01;
@@ -638,8 +694,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XYE_does_left_shift(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_8XYE_does_left_shift(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1000_0010;
 
         cpu.exec_opcode(0x814E);
@@ -649,8 +705,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_9XY0_skips_instruction_if_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_9XY0_skips_instruction_if_ne(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x11;
 
@@ -660,8 +720,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_ANNN_sets_index(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_ANNN_sets_index(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0xA123);
 
@@ -669,8 +729,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_BNNN_jumps(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_BNNN_jumps(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[0] = 0x10;
 
         cpu.exec_opcode(0xB113);
@@ -679,14 +739,18 @@ mod tests {
     }
 
     #[rstest]
-    fn op_DXYN_draws_sprite(mut window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+    fn op_DXYN_draws_sprite(
+        mut window: Box<MockWindow>,
+        mut mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         mmu.expect_read_u8().returning(|x| u16::from(x) as u8);
         window
             .expect_draw()
             .with(eq(7), eq(8), eq(vec![0x10]))
             .returning(|_, _, _| true);
 
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[3] = 7;
         cpu.registers[2] = 8;
         cpu.index = u12::new(0x010);
@@ -697,7 +761,11 @@ mod tests {
     }
 
     #[rstest]
-    fn op_DXYN_draws_non_zero_sprite(mut window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+    fn op_DXYN_draws_non_zero_sprite(
+        mut window: Box<MockWindow>,
+        mut mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         mmu.expect_read_u8()
             .times(2)
             .returning(|x| u16::from(x) as u8);
@@ -705,7 +773,7 @@ mod tests {
             .expect_draw()
             .with(eq(7), eq(8), eq(vec![0x10, 0x11]))
             .returning(|_, _, _| false);
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[3] = 7;
         cpu.registers[2] = 8;
         cpu.index = u12::new(0x010);
@@ -715,12 +783,16 @@ mod tests {
     }
 
     #[rstest]
-    fn op_EX9E_skips_if_key_pressed(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+    fn op_EX9E_skips_if_key_pressed(
+        mut window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         window
             .expect_is_key_pressed()
             .with(eq(0xA))
             .returning(|_| true);
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0xA;
 
         cpu.exec_opcode(0xE49E);
@@ -729,12 +801,16 @@ mod tests {
     }
 
     #[rstest]
-    fn op_EXA1_skips_if_key_not_pressed(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+    fn op_EXA1_skips_if_key_not_pressed(
+        mut window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         window
             .expect_is_key_pressed()
             .with(eq(0xA))
             .returning(|_| false);
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0xA;
 
         cpu.exec_opcode(0xE4A1);
@@ -743,8 +819,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX07_sets_vx_to_delay(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_FX07_sets_vx_to_delay(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.delay_timer = 0xA1;
 
         cpu.exec_opcode(0xF407);
@@ -753,9 +829,13 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX0A_sets_vx_to_key(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+    fn op_FX0A_sets_vx_to_key(
+        mut window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         window.expect_get_pressed_key().returning(|| Some(0x8));
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0xF40A);
 
@@ -764,9 +844,13 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX0A_blocks_when_no_key(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+    fn op_FX0A_blocks_when_no_key(
+        mut window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         window.expect_get_pressed_key().returning(|| None);
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0xF40A);
 
@@ -774,8 +858,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX15_sets_delay(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_FX15_sets_delay(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0xA2;
 
         cpu.exec_opcode(0xF415);
@@ -784,8 +868,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX15_sets_sound(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_FX15_sets_sound(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0xA3;
 
         cpu.exec_opcode(0xF418);
@@ -794,8 +878,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX1E_increments_index(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_FX1E_increments_index(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.index = u12::new(0xA00);
         cpu.registers[4] = 0xFF;
 
@@ -805,8 +889,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX29_sets_index_to_sprite(window: Box<MockWindow>, mmu: Box<MockMmu>) {
-        let mut cpu = Cpu::new(mmu, window);
+    fn op_FX29_sets_index_to_sprite(
+        window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[4] = 0xB;
 
         cpu.exec_opcode(0xF429);
@@ -815,7 +903,7 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX33_writes_bcd(window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+    fn op_FX33_writes_bcd(window: Box<MockWindow>, mut mmu: Box<MockMmu>, audio: Box<MockAudio>) {
         mmu.expect_write_u8()
             .with(eq(u12::new(0x100)), eq(2))
             .returning(|_, _| ());
@@ -826,7 +914,7 @@ mod tests {
             .with(eq(u12::new(0x102)), eq(3))
             .returning(|_, _| ());
 
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.index = u12::new(0x100);
         cpu.registers[4] = 213;
 
@@ -834,7 +922,11 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX55_dumps_registers(window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+    fn op_FX55_dumps_registers(
+        window: Box<MockWindow>,
+        mut mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         mmu.expect_write_u8()
             .with(eq(u12::new(0x100)), eq(0x10))
             .returning(|_, _| ());
@@ -842,7 +934,7 @@ mod tests {
             .with(eq(u12::new(0x101)), eq(0x23))
             .returning(|_, _| ());
 
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.index = u12::new(0x100);
         cpu.registers[0] = 0x10;
         cpu.registers[1] = 0x23;
@@ -851,7 +943,11 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX55_loads_registers(window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+    fn op_FX55_loads_registers(
+        window: Box<MockWindow>,
+        mut mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
         mmu.expect_read_u8()
             .with(eq(u12::new(0x100)))
             .return_const(7);
@@ -860,7 +956,7 @@ mod tests {
             .with(eq(u12::new(0x101)))
             .return_const(8);
 
-        let mut cpu = Cpu::new(mmu, window);
+        let mut cpu = Cpu::new(mmu, window, audio);
         cpu.index = u12::new(0x100);
 
         cpu.exec_opcode(0xF165);
