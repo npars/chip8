@@ -2,19 +2,16 @@ mod cpu;
 mod mmu;
 mod window;
 
-use crate::window::Window;
 use mmu::Mmu;
-use std::cell::RefCell;
-use std::rc::Rc;
 use tokio::time::{self, Duration, Instant};
 
 pub async fn run(frequency: u32, file_path: &str) {
     let duration_60hz: Duration = Duration::from_secs_f64(1f64 / 60f64);
 
-    let mmu = Rc::new(RefCell::new(mmu::Chip8Mmu::new()));
-    mmu.borrow_mut().load_program(file_path).unwrap();
-    let window = Rc::new(RefCell::new(window::MiniFbWindow::new()));
-    let mut cpu = cpu::Cpu::new(mmu.clone(), window.clone());
+    let mut mmu = Box::new(mmu::Chip8Mmu::new());
+    mmu.load_program(file_path).unwrap();
+    let window = Box::new(window::MiniFbWindow::new());
+    let mut cpu = cpu::Cpu::new(mmu, window);
 
     let mut last_60hz_tick = Instant::now();
     let mut interval = time::interval(Duration::from_secs_f64(1f64 / (frequency as f64)));
@@ -24,7 +21,6 @@ pub async fn run(frequency: u32, file_path: &str) {
         if (now - last_60hz_tick) >= duration_60hz {
             last_60hz_tick += duration_60hz;
             cpu.run_60hz_cycle();
-            window.borrow_mut().render();
         }
 
         cpu.run_cycle()

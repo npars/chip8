@@ -1,14 +1,12 @@
 use super::mmu::Mmu;
 use super::window::Window;
 use crate::mmu::Chip8Mmu;
-use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::rc::Rc;
 use ux::u12;
 
 pub struct Cpu {
-    mmu: Rc<RefCell<dyn Mmu>>,
-    window: Rc<RefCell<dyn Window>>,
+    mmu: Box<dyn Mmu>,
+    window: Box<dyn Window>,
     registers: Vec<u8>,
     index: u12,
     program_counter: u12,
@@ -41,7 +39,7 @@ impl Cpu {
         Self::opcode_f,
     ];
 
-    pub fn new(mmu: Rc<RefCell<dyn Mmu>>, window: Rc<RefCell<dyn Window>>) -> Cpu {
+    pub fn new(mmu: Box<dyn Mmu>, window: Box<dyn Window>) -> Cpu {
         Cpu {
             mmu,
             window,
@@ -55,7 +53,7 @@ impl Cpu {
     }
 
     pub fn run_cycle(&mut self) {
-        let opcode = self.mmu.as_ref().borrow().read_u16(self.program_counter);
+        let opcode = self.mmu.read_u16(self.program_counter);
         self.exec_opcode(opcode);
     }
 
@@ -67,6 +65,8 @@ impl Cpu {
         if self.delay_timer > 0 {
             self.delay_timer -= 1;
         }
+
+        self.window.render()
     }
 
     fn exec_opcode(&mut self, opcode: u16) {
@@ -85,7 +85,7 @@ impl Cpu {
         match u16::from(data) {
             // Blank Screen
             0x0E0 => {
-                self.window.borrow_mut().blank_screen();
+                self.window.blank_screen();
                 None
             }
             // Return from subroutine
@@ -249,14 +249,9 @@ impl Cpu {
         let (x, y, n) = Self::split_xyn(data);
 
         let sprite = (0..n)
-            .map(|i| {
-                self.mmu
-                    .as_ref()
-                    .borrow()
-                    .read_u8(self.index.wrapping_add(u12::from(i)))
-            })
+            .map(|i| self.mmu.read_u8(self.index.wrapping_add(u12::from(i))))
             .collect();
-        self.registers[Self::CARRY_REGISTER] = self.window.borrow_mut().draw(
+        self.registers[Self::CARRY_REGISTER] = self.window.draw(
             self.registers[x as usize],
             self.registers[y as usize],
             sprite,
@@ -267,11 +262,7 @@ impl Cpu {
     fn opcode_e(&mut self, data: u12) -> Option<u12> {
         let (x, opcode) = Self::split_xnn(data);
 
-        let is_key_pressed = self
-            .window
-            .as_ref()
-            .borrow()
-            .is_key_pressed(self.registers[x as usize]);
+        let is_key_pressed = self.window.is_key_pressed(self.registers[x as usize]);
 
         match opcode {
             // Skips the next instruction if the key stored in VX is pressed.
@@ -309,7 +300,7 @@ impl Cpu {
             // Sets VX to the value of the delay timer.
             0x07 => self.registers[x] = self.delay_timer,
             // A key press is awaited, and then stored in VX.
-            0x0A => match self.window.as_ref().borrow().get_pressed_key() {
+            0x0A => match self.window.get_pressed_key() {
                 Some(key) => self.registers[x] = key,
                 None => return Some(self.program_counter),
             },
@@ -326,21 +317,18 @@ impl Cpu {
             }
             // Stores the binary-coded decimal representation of VX
             0x33 => {
-                self.mmu
-                    .borrow_mut()
-                    .write_u8(self.index, self.registers[x] / 100);
-                self.mmu.borrow_mut().write_u8(
+                self.mmu.write_u8(self.index, self.registers[x] / 100);
+                self.mmu.write_u8(
                     self.index.wrapping_add(u12::new(1)),
                     (self.registers[x] % 100) / 10,
                 );
                 self.mmu
-                    .borrow_mut()
                     .write_u8(self.index.wrapping_add(u12::new(2)), self.registers[x] % 10);
             }
             // Stores V0 to VX (including VX) in memory starting at address I.
             0x55 => {
                 for i in 0..=x {
-                    self.mmu.borrow_mut().write_u8(
+                    self.mmu.write_u8(
                         self.index.wrapping_add(u12::from(i as u8)),
                         self.registers[i],
                     );
@@ -351,7 +339,6 @@ impl Cpu {
                 for i in 0..=x {
                     self.registers[i] = self
                         .mmu
-                        .borrow()
                         .read_u8(self.index.wrapping_add(u12::from(i as u8)));
                 }
             }
@@ -385,25 +372,25 @@ mod tests {
     use rstest::*;
 
     #[fixture]
-    fn mmu() -> Rc<RefCell<MockMmu>> {
-        Rc::new(RefCell::new(MockMmu::new()))
+    fn mmu() -> Box<MockMmu> {
+        Box::new(MockMmu::new())
     }
 
     #[fixture]
-    fn window() -> Rc<RefCell<MockWindow>> {
-        Rc::new(RefCell::new(MockWindow::new()))
+    fn window() -> Box<MockWindow> {
+        Box::new(MockWindow::new())
     }
 
     #[rstest]
-    fn pc_has_default(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let cpu = Cpu::new(mmu.clone(), window.clone());
+    fn pc_has_default(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let cpu = Cpu::new(mmu, window);
         assert_eq!(u12::new(0x200), cpu.program_counter);
     }
 
     #[rstest]
-    fn op_00E0_blanks_screen(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        window.borrow_mut().expect_blank_screen().returning(|| ());
+    fn op_00E0_blanks_screen(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        window.expect_blank_screen().returning(|| ());
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0x00E0);
 
@@ -411,8 +398,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_00E0_returns_from_subroutine(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_00E0_returns_from_subroutine(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.stack.push_back(u12::new(0x400));
 
         cpu.exec_opcode(0x00EE);
@@ -421,8 +408,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_1NNN_jumps_to_address(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_1NNN_jumps_to_address(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0x1400);
 
@@ -430,8 +417,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_2NNN_calls_subroutine(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_2NNN_calls_subroutine(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0x2400);
 
@@ -440,8 +427,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_3XNN_skips_instruction_if_eq(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_3XNN_skips_instruction_if_eq(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x10;
 
         cpu.exec_opcode(0x3410);
@@ -450,8 +437,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_3XNN_does_not_skip_when_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_3XNN_does_not_skip_when_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x11;
 
         cpu.exec_opcode(0x3410);
@@ -460,8 +447,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_4XNN_skips_instruction_if_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_4XNN_skips_instruction_if_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x11;
 
         cpu.exec_opcode(0x4410);
@@ -470,8 +457,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_4XNN_does_not_skip_when_eq(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_4XNN_does_not_skip_when_eq(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x10;
 
         cpu.exec_opcode(0x4410);
@@ -480,8 +467,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_5XY0_skips_instruction_if_eq(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_5XY0_skips_instruction_if_eq(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x10;
 
@@ -491,8 +478,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_5XY0_does_not_skip_when_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_5XY0_does_not_skip_when_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x11;
 
@@ -502,8 +489,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_6XNN_sets_register(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_6XNN_sets_register(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0x6450);
 
@@ -511,8 +498,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_7XNN_adds_to_register(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_7XNN_adds_to_register(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x02;
 
         cpu.exec_opcode(0x74FF);
@@ -522,8 +509,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY0_sets_register(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY0_sets_register(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x02;
 
         cpu.exec_opcode(0x8140);
@@ -532,8 +519,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY1_does_or(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY1_does_or(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -543,8 +530,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY2_does_and(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY2_does_and(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -554,8 +541,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY3_does_xor(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY3_does_xor(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
 
@@ -565,8 +552,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY4_does_add(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY4_does_add(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x04;
         cpu.registers[4] = 0x03;
@@ -578,8 +565,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY4_does_add_with_carry(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY4_does_add_with_carry(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0xFF;
         cpu.registers[4] = 0x03;
 
@@ -590,8 +577,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY5_does_sub(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY5_does_sub(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0x05;
         cpu.registers[4] = 0x03;
 
@@ -602,8 +589,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY5_does_sub_with_carry(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY5_does_sub_with_carry(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x01;
         cpu.registers[4] = 0x02;
@@ -615,8 +602,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY6_does_right_shift(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY6_does_right_shift(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0b0101;
 
         cpu.exec_opcode(0x8146);
@@ -626,8 +613,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY7_does_reverse_sub(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY7_does_reverse_sub(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0x03;
         cpu.registers[4] = 0x05;
 
@@ -638,11 +625,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XY7_does_reverse_sub_with_carry(
-        window: Rc<RefCell<MockWindow>>,
-        mmu: Rc<RefCell<MockMmu>>,
-    ) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XY7_does_reverse_sub_with_carry(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[Cpu::CARRY_REGISTER] = 0x01;
         cpu.registers[1] = 0x02;
         cpu.registers[4] = 0x01;
@@ -654,8 +638,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_8XYE_does_left_shift(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_8XYE_does_left_shift(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[1] = 0b1000_0010;
 
         cpu.exec_opcode(0x814E);
@@ -665,8 +649,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_9XY0_skips_instruction_if_ne(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_9XY0_skips_instruction_if_ne(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0x10;
         cpu.registers[5] = 0x11;
 
@@ -676,8 +660,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_ANNN_sets_index(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_ANNN_sets_index(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0xA123);
 
@@ -685,8 +669,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_BNNN_jumps(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_BNNN_jumps(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[0] = 0x10;
 
         cpu.exec_opcode(0xB113);
@@ -695,19 +679,17 @@ mod tests {
     }
 
     #[rstest]
-    fn op_DXYN_draws_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        cpu.registers[3] = 7;
-        cpu.registers[2] = 8;
-        cpu.index = u12::new(0x010);
-        mmu.borrow_mut()
-            .expect_read_u8()
-            .returning(|x| u16::from(x) as u8);
+    fn op_DXYN_draws_sprite(mut window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+        mmu.expect_read_u8().returning(|x| u16::from(x) as u8);
         window
-            .borrow_mut()
             .expect_draw()
             .with(eq(7), eq(8), eq(vec![0x10]))
             .returning(|_, _, _| true);
+
+        let mut cpu = Cpu::new(mmu, window);
+        cpu.registers[3] = 7;
+        cpu.registers[2] = 8;
+        cpu.index = u12::new(0x010);
 
         cpu.exec_opcode(0xD321);
 
@@ -715,33 +697,30 @@ mod tests {
     }
 
     #[rstest]
-    fn op_DXYN_draws_non_zero_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        cpu.registers[3] = 7;
-        cpu.registers[2] = 8;
-        cpu.index = u12::new(0x010);
-        mmu.borrow_mut()
-            .expect_read_u8()
+    fn op_DXYN_draws_non_zero_sprite(mut window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+        mmu.expect_read_u8()
             .times(2)
             .returning(|x| u16::from(x) as u8);
         window
-            .borrow_mut()
             .expect_draw()
             .with(eq(7), eq(8), eq(vec![0x10, 0x11]))
             .returning(|_, _, _| false);
+        let mut cpu = Cpu::new(mmu, window);
+        cpu.registers[3] = 7;
+        cpu.registers[2] = 8;
+        cpu.index = u12::new(0x010);
 
         cpu.exec_opcode(0xD322);
         assert_eq!(0x0, cpu.registers[0xF])
     }
 
     #[rstest]
-    fn op_EX9E_skips_if_key_pressed(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_EX9E_skips_if_key_pressed(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
         window
-            .borrow_mut()
             .expect_is_key_pressed()
             .with(eq(0xA))
             .returning(|_| true);
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0xA;
 
         cpu.exec_opcode(0xE49E);
@@ -750,16 +729,12 @@ mod tests {
     }
 
     #[rstest]
-    fn op_EXA1_skips_if_key_not_pressed(
-        window: Rc<RefCell<MockWindow>>,
-        mmu: Rc<RefCell<MockMmu>>,
-    ) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_EXA1_skips_if_key_not_pressed(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
         window
-            .borrow_mut()
             .expect_is_key_pressed()
             .with(eq(0xA))
             .returning(|_| false);
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0xA;
 
         cpu.exec_opcode(0xE4A1);
@@ -768,8 +743,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX07_sets_vx_to_delay(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_FX07_sets_vx_to_delay(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.delay_timer = 0xA1;
 
         cpu.exec_opcode(0xF407);
@@ -778,12 +753,9 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX0A_sets_vx_to_key(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        window
-            .borrow_mut()
-            .expect_get_pressed_key()
-            .returning(|| Some(0x8));
+    fn op_FX0A_sets_vx_to_key(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        window.expect_get_pressed_key().returning(|| Some(0x8));
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0xF40A);
 
@@ -792,12 +764,9 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX0A_blocks_when_no_key(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        window
-            .borrow_mut()
-            .expect_get_pressed_key()
-            .returning(|| None);
+    fn op_FX0A_blocks_when_no_key(mut window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        window.expect_get_pressed_key().returning(|| None);
+        let mut cpu = Cpu::new(mmu, window);
 
         cpu.exec_opcode(0xF40A);
 
@@ -805,8 +774,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX15_sets_delay(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_FX15_sets_delay(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0xA2;
 
         cpu.exec_opcode(0xF415);
@@ -815,8 +784,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX15_sets_sound(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_FX15_sets_sound(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0xA3;
 
         cpu.exec_opcode(0xF418);
@@ -825,8 +794,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX1E_increments_index(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_FX1E_increments_index(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.index = u12::new(0xA00);
         cpu.registers[4] = 0xFF;
 
@@ -836,8 +805,8 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX29_sets_index_to_sprite(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_FX29_sets_index_to_sprite(window: Box<MockWindow>, mmu: Box<MockMmu>) {
+        let mut cpu = Cpu::new(mmu, window);
         cpu.registers[4] = 0xB;
 
         cpu.exec_opcode(0xF429);
@@ -846,60 +815,53 @@ mod tests {
     }
 
     #[rstest]
-    fn op_FX33_writes_bcd(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        cpu.index = u12::new(0x100);
-        cpu.registers[4] = 213;
-
-        mmu.borrow_mut()
-            .expect_write_u8()
+    fn op_FX33_writes_bcd(window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+        mmu.expect_write_u8()
             .with(eq(u12::new(0x100)), eq(2))
             .returning(|_, _| ());
-        mmu.borrow_mut()
-            .expect_write_u8()
+        mmu.expect_write_u8()
             .with(eq(u12::new(0x101)), eq(1))
             .returning(|_, _| ());
-        mmu.borrow_mut()
-            .expect_write_u8()
+        mmu.expect_write_u8()
             .with(eq(u12::new(0x102)), eq(3))
             .returning(|_, _| ());
+
+        let mut cpu = Cpu::new(mmu, window);
+        cpu.index = u12::new(0x100);
+        cpu.registers[4] = 213;
 
         cpu.exec_opcode(0xF433);
     }
 
     #[rstest]
-    fn op_FX55_dumps_registers(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
+    fn op_FX55_dumps_registers(window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+        mmu.expect_write_u8()
+            .with(eq(u12::new(0x100)), eq(0x10))
+            .returning(|_, _| ());
+        mmu.expect_write_u8()
+            .with(eq(u12::new(0x101)), eq(0x23))
+            .returning(|_, _| ());
+
+        let mut cpu = Cpu::new(mmu, window);
         cpu.index = u12::new(0x100);
         cpu.registers[0] = 0x10;
         cpu.registers[1] = 0x23;
-
-        mmu.borrow_mut()
-            .expect_write_u8()
-            .with(eq(u12::new(0x100)), eq(0x10))
-            .returning(|_, _| ());
-        mmu.borrow_mut()
-            .expect_write_u8()
-            .with(eq(u12::new(0x101)), eq(0x23))
-            .returning(|_, _| ());
 
         cpu.exec_opcode(0xF155);
     }
 
     #[rstest]
-    fn op_FX55_loads_registers(window: Rc<RefCell<MockWindow>>, mmu: Rc<RefCell<MockMmu>>) {
-        let mut cpu = Cpu::new(mmu.clone(), window.clone());
-        cpu.index = u12::new(0x100);
-
-        mmu.borrow_mut()
-            .expect_read_u8()
+    fn op_FX55_loads_registers(window: Box<MockWindow>, mut mmu: Box<MockMmu>) {
+        mmu.expect_read_u8()
             .with(eq(u12::new(0x100)))
             .return_const(7);
 
-        mmu.borrow_mut()
-            .expect_read_u8()
+        mmu.expect_read_u8()
             .with(eq(u12::new(0x101)))
             .return_const(8);
+
+        let mut cpu = Cpu::new(mmu, window);
+        cpu.index = u12::new(0x100);
 
         cpu.exec_opcode(0xF165);
 
