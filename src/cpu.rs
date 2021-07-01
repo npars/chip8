@@ -2,19 +2,19 @@ use super::audio::Audio;
 use super::mmu::Mmu;
 use super::window::Window;
 use crate::mmu::Chip8Mmu;
+use arbintrary::uint;
 use std::collections::VecDeque;
-use ux::u12;
 
 pub struct Cpu {
     mmu: Box<dyn Mmu>,
     window: Box<dyn Window>,
     audio: Box<dyn Audio>,
     registers: Vec<u8>,
-    index: u12,
-    program_counter: u12,
+    index: uint<12>,
+    program_counter: uint<12>,
     delay_timer: u8,
     sound_timer: u8,
-    stack: VecDeque<u12>,
+    stack: VecDeque<uint<12>>,
 }
 
 impl Cpu {
@@ -22,7 +22,7 @@ impl Cpu {
     const REGISTER_SIZE: usize = 16;
     const STACK_SIZE: usize = 16;
     const CARRY_REGISTER: usize = 0xF;
-    const FUNC_MAP: [fn(&mut Self, u12) -> Option<u12>; 16] = [
+    const FUNC_MAP: [fn(&mut Self, uint<12>) -> Option<uint<12>>; 16] = [
         Self::opcode_0,
         Self::opcode_1,
         Self::opcode_2,
@@ -47,8 +47,8 @@ impl Cpu {
             window,
             audio,
             registers: vec![0; Cpu::REGISTER_SIZE],
-            index: u12::new(0),
-            program_counter: u12::new(0x200),
+            index: uint::<12>::new(0),
+            program_counter: uint::<12>::new(0x200),
             delay_timer: 0,
             sound_timer: 0,
             stack: VecDeque::with_capacity(Cpu::STACK_SIZE),
@@ -77,17 +77,17 @@ impl Cpu {
 
     fn exec_opcode(&mut self, opcode: u16) {
         // Run the opcode, then update the program_counter
-        match Cpu::FUNC_MAP[(opcode >> 12) as usize](self, u12::new(opcode & 0xFFF)) {
+        match Cpu::FUNC_MAP[(opcode >> 12) as usize](self, uint::<12>::new(opcode & 0xFFF)) {
             Some(program_counter) => self.program_counter = program_counter,
             None => {
                 self.program_counter = self
                     .program_counter
-                    .wrapping_add(u12::new(Self::OPCODE_SIZE))
+                    .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE))
             }
         }
     }
 
-    fn opcode_0(&mut self, data: u12) -> Option<u12> {
+    fn opcode_0(&mut self, data: uint<12>) -> Option<uint<12>> {
         match u16::from(data) {
             // Blank Screen
             0x0E0 => {
@@ -105,74 +105,74 @@ impl Cpu {
         }
     }
 
-    fn opcode_1(&mut self, data: u12) -> Option<u12> {
+    fn opcode_1(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Jump to address
         Some(data)
     }
 
-    fn opcode_2(&mut self, data: u12) -> Option<u12> {
+    fn opcode_2(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Call subroutine
         self.stack.push_back(
             self.program_counter
-                .wrapping_add(u12::new(Self::OPCODE_SIZE)),
+                .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE)),
         );
         Some(data)
     }
 
-    fn opcode_3(&mut self, data: u12) -> Option<u12> {
+    fn opcode_3(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Skips the next instruction if VX equals NN.
         let (reg_index, value) = Self::split_xnn(data);
         if self.registers[reg_index as usize] == value {
             Some(
                 self.program_counter
-                    .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                    .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE * 2)),
             )
         } else {
             None
         }
     }
 
-    fn opcode_4(&mut self, data: u12) -> Option<u12> {
+    fn opcode_4(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Skips the next instruction if VX doesn't equal NN.
         let (reg_index, value) = Self::split_xnn(data);
         if self.registers[reg_index as usize] != value {
             Some(
                 self.program_counter
-                    .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                    .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE * 2)),
             )
         } else {
             None
         }
     }
 
-    fn opcode_5(&mut self, data: u12) -> Option<u12> {
+    fn opcode_5(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Skips the next instruction if VX equals VY
         let (x, y, _) = Self::split_xyn(data);
         if self.registers[x as usize] == self.registers[y as usize] {
             Some(
                 self.program_counter
-                    .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                    .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE * 2)),
             )
         } else {
             None
         }
     }
 
-    fn opcode_6(&mut self, data: u12) -> Option<u12> {
+    fn opcode_6(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Sets VX to NN
         let (reg_index, value) = Self::split_xnn(data);
         self.registers[reg_index as usize] = value;
         None
     }
 
-    fn opcode_7(&mut self, data: u12) -> Option<u12> {
+    fn opcode_7(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Adds NN to VX. (Carry flag is not changed)
         let (reg_index, value) = Self::split_xnn(data);
         self.registers[reg_index as usize] = self.registers[reg_index as usize].wrapping_add(value);
         None
     }
 
-    fn opcode_8(&mut self, data: u12) -> Option<u12> {
+    fn opcode_8(&mut self, data: uint<12>) -> Option<uint<12>> {
         let (x, y, opcode) = Self::split_xyn(data);
         let x = x as usize;
         let y = y as usize;
@@ -219,43 +219,46 @@ impl Cpu {
         None
     }
 
-    fn opcode_9(&mut self, data: u12) -> Option<u12> {
+    fn opcode_9(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Skips the next instruction if VX doesn't equal VY.
         let (x, y, _) = Self::split_xyn(data);
         if self.registers[x as usize] != self.registers[y as usize] {
             Some(
                 self.program_counter
-                    .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                    .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE * 2)),
             )
         } else {
             None
         }
     }
 
-    fn opcode_a(&mut self, data: u12) -> Option<u12> {
+    fn opcode_a(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Sets I to the address NNN
         self.index = data;
         None
     }
 
-    fn opcode_b(&mut self, data: u12) -> Option<u12> {
+    fn opcode_b(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Jumps to the address NNN plus V0.
-        Some(u12::from(self.registers[0]).wrapping_add(data))
+        Some(uint::<12>::new(self.registers[0].into()).wrapping_add(data))
     }
 
-    fn opcode_c(&mut self, data: u12) -> Option<u12> {
+    fn opcode_c(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Sets VX to the result of a bitwise and operation on a random number and NN.
         let (register_index, bitmask) = Self::split_xnn(data);
         self.registers[register_index as usize] = fastrand::u8(..) & bitmask;
         None
     }
 
-    fn opcode_d(&mut self, data: u12) -> Option<u12> {
+    fn opcode_d(&mut self, data: uint<12>) -> Option<uint<12>> {
         // Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N+1 pixels
         let (x, y, n) = Self::split_xyn(data);
 
         let sprite = (0..n)
-            .map(|i| self.mmu.read_u8(self.index.wrapping_add(u12::from(i))))
+            .map(|i| {
+                self.mmu
+                    .read_u8(self.index.wrapping_add(uint::<12>::new(i.into())))
+            })
             .collect();
         self.registers[Self::CARRY_REGISTER] = self.window.draw(
             self.registers[x as usize],
@@ -265,7 +268,7 @@ impl Cpu {
         None
     }
 
-    fn opcode_e(&mut self, data: u12) -> Option<u12> {
+    fn opcode_e(&mut self, data: uint<12>) -> Option<uint<12>> {
         let (x, opcode) = Self::split_xnn(data);
 
         let is_key_pressed = self.window.is_key_pressed(self.registers[x as usize]);
@@ -276,7 +279,7 @@ impl Cpu {
                 if is_key_pressed {
                     Some(
                         self.program_counter
-                            .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                            .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE * 2)),
                     )
                 } else {
                     None
@@ -287,7 +290,7 @@ impl Cpu {
                 if !is_key_pressed {
                     Some(
                         self.program_counter
-                            .wrapping_add(u12::new(Self::OPCODE_SIZE * 2)),
+                            .wrapping_add(uint::<12>::new(Self::OPCODE_SIZE * 2)),
                     )
                 } else {
                     None
@@ -298,7 +301,7 @@ impl Cpu {
         }
     }
 
-    fn opcode_f(&mut self, data: u12) -> Option<u12> {
+    fn opcode_f(&mut self, data: uint<12>) -> Option<uint<12>> {
         let (x, opcode) = Self::split_xnn(data);
         let x = x as usize;
 
@@ -315,27 +318,34 @@ impl Cpu {
             // Sets the sound timer to VX.
             0x18 => self.sound_timer = self.registers[x],
             // Adds VX to I. VF is not affected.
-            0x1E => self.index = self.index.wrapping_add(u12::from(self.registers[x])),
+            0x1E => {
+                self.index = self
+                    .index
+                    .wrapping_add(uint::<12>::new(self.registers[x].into()))
+            }
             // Sets I to the location of the sprite for the character in VX.
             0x29 => {
-                self.index =
-                    u12::new((Chip8Mmu::FONT_SPRITE_HEIGHT as u16) * (self.registers[x] as u16))
+                self.index = uint::<12>::new(
+                    (Chip8Mmu::FONT_SPRITE_HEIGHT as u16) * (self.registers[x] as u16),
+                )
             }
             // Stores the binary-coded decimal representation of VX
             0x33 => {
                 self.mmu.write_u8(self.index, self.registers[x] / 100);
                 self.mmu.write_u8(
-                    self.index.wrapping_add(u12::new(1)),
+                    self.index.wrapping_add(uint::<12>::new(1)),
                     (self.registers[x] % 100) / 10,
                 );
-                self.mmu
-                    .write_u8(self.index.wrapping_add(u12::new(2)), self.registers[x] % 10);
+                self.mmu.write_u8(
+                    self.index.wrapping_add(uint::<12>::new(2)),
+                    self.registers[x] % 10,
+                );
             }
             // Stores V0 to VX (including VX) in memory starting at address I.
             0x55 => {
                 for i in 0..=x {
                     self.mmu.write_u8(
-                        self.index.wrapping_add(u12::from(i as u8)),
+                        self.index.wrapping_add(uint::<12>::new(i as u16)),
                         self.registers[i],
                     );
                 }
@@ -345,7 +355,7 @@ impl Cpu {
                 for i in 0..=x {
                     self.registers[i] = self
                         .mmu
-                        .read_u8(self.index.wrapping_add(u12::from(i as u8)));
+                        .read_u8(self.index.wrapping_add(uint::<12>::new(i as u16)));
                 }
             }
             _ => panic!("Unhandled register operation"),
@@ -353,12 +363,12 @@ impl Cpu {
         None
     }
 
-    fn split_xnn(data: u12) -> (u8, u8) {
+    fn split_xnn(data: uint<12>) -> (u8, u8) {
         let data = u16::from(data);
         (((data & 0xF00) >> 8) as u8, (data & 0xFF) as u8)
     }
 
-    fn split_xyn(data: u12) -> (u8, u8, u8) {
+    fn split_xyn(data: uint<12>) -> (u8, u8, u8) {
         let data = u16::from(data);
         (
             ((data & 0xF00) >> 8) as u8,
@@ -396,7 +406,7 @@ mod tests {
     #[rstest]
     fn pc_has_default(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
         let cpu = Cpu::new(mmu, window, audio);
-        assert_eq!(u12::new(0x200), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x200), cpu.program_counter);
     }
 
     #[rstest]
@@ -410,7 +420,7 @@ mod tests {
 
         cpu.exec_opcode(0x00E0);
 
-        assert_eq!(u12::new(0x202), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x202), cpu.program_counter);
     }
 
     #[rstest]
@@ -420,11 +430,11 @@ mod tests {
         audio: Box<MockAudio>,
     ) {
         let mut cpu = Cpu::new(mmu, window, audio);
-        cpu.stack.push_back(u12::new(0x400));
+        cpu.stack.push_back(uint::<12>::new(0x400));
 
         cpu.exec_opcode(0x00EE);
 
-        assert_eq!(u12::new(0x400), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x400), cpu.program_counter);
     }
 
     #[rstest]
@@ -433,7 +443,7 @@ mod tests {
 
         cpu.exec_opcode(0x1400);
 
-        assert_eq!(u12::new(0x400), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x400), cpu.program_counter);
     }
 
     #[rstest]
@@ -442,8 +452,8 @@ mod tests {
 
         cpu.exec_opcode(0x2400);
 
-        assert_eq!(u12::new(0x400), cpu.program_counter);
-        assert_eq!(u12::new(0x202), cpu.stack.pop_back().unwrap());
+        assert_eq!(uint::<12>::new(0x400), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x202), cpu.stack.pop_back().unwrap());
     }
 
     #[rstest]
@@ -457,7 +467,7 @@ mod tests {
 
         cpu.exec_opcode(0x3410);
 
-        assert_eq!(u12::new(0x204), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x204), cpu.program_counter);
     }
 
     #[rstest]
@@ -471,7 +481,7 @@ mod tests {
 
         cpu.exec_opcode(0x3410);
 
-        assert_eq!(u12::new(0x202), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x202), cpu.program_counter);
     }
 
     #[rstest]
@@ -485,7 +495,7 @@ mod tests {
 
         cpu.exec_opcode(0x4410);
 
-        assert_eq!(u12::new(0x204), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x204), cpu.program_counter);
     }
 
     #[rstest]
@@ -499,7 +509,7 @@ mod tests {
 
         cpu.exec_opcode(0x4410);
 
-        assert_eq!(u12::new(0x202), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x202), cpu.program_counter);
     }
 
     #[rstest]
@@ -514,7 +524,7 @@ mod tests {
 
         cpu.exec_opcode(0x5450);
 
-        assert_eq!(u12::new(0x204), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x204), cpu.program_counter);
     }
 
     #[rstest]
@@ -529,7 +539,7 @@ mod tests {
 
         cpu.exec_opcode(0x5450);
 
-        assert_eq!(u12::new(0x202), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x202), cpu.program_counter);
     }
 
     #[rstest]
@@ -716,7 +726,7 @@ mod tests {
 
         cpu.exec_opcode(0x9450);
 
-        assert_eq!(u12::new(0x204), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x204), cpu.program_counter);
     }
 
     #[rstest]
@@ -725,7 +735,7 @@ mod tests {
 
         cpu.exec_opcode(0xA123);
 
-        assert_eq!(u12::new(0x123), cpu.index);
+        assert_eq!(uint::<12>::new(0x123), cpu.index);
     }
 
     #[rstest]
@@ -735,7 +745,7 @@ mod tests {
 
         cpu.exec_opcode(0xB113);
 
-        assert_eq!(u12::new(0x123), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x123), cpu.program_counter);
     }
 
     #[rstest]
@@ -753,7 +763,7 @@ mod tests {
         let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[3] = 7;
         cpu.registers[2] = 8;
-        cpu.index = u12::new(0x010);
+        cpu.index = uint::<12>::new(0x010);
 
         cpu.exec_opcode(0xD321);
 
@@ -776,7 +786,7 @@ mod tests {
         let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[3] = 7;
         cpu.registers[2] = 8;
-        cpu.index = u12::new(0x010);
+        cpu.index = uint::<12>::new(0x010);
 
         cpu.exec_opcode(0xD322);
         assert_eq!(0x0, cpu.registers[0xF])
@@ -797,7 +807,7 @@ mod tests {
 
         cpu.exec_opcode(0xE49E);
 
-        assert_eq!(u12::new(0x204), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x204), cpu.program_counter);
     }
 
     #[rstest]
@@ -815,7 +825,7 @@ mod tests {
 
         cpu.exec_opcode(0xE4A1);
 
-        assert_eq!(u12::new(0x204), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x204), cpu.program_counter);
     }
 
     #[rstest]
@@ -840,7 +850,7 @@ mod tests {
         cpu.exec_opcode(0xF40A);
 
         assert_eq!(0x8, cpu.registers[4]);
-        assert_eq!(u12::new(0x202), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x202), cpu.program_counter);
     }
 
     #[rstest]
@@ -854,7 +864,7 @@ mod tests {
 
         cpu.exec_opcode(0xF40A);
 
-        assert_eq!(u12::new(0x200), cpu.program_counter);
+        assert_eq!(uint::<12>::new(0x200), cpu.program_counter);
     }
 
     #[rstest]
@@ -880,12 +890,12 @@ mod tests {
     #[rstest]
     fn op_FX1E_increments_index(window: Box<MockWindow>, mmu: Box<MockMmu>, audio: Box<MockAudio>) {
         let mut cpu = Cpu::new(mmu, window, audio);
-        cpu.index = u12::new(0xA00);
+        cpu.index = uint::<12>::new(0xA00);
         cpu.registers[4] = 0xFF;
 
         cpu.exec_opcode(0xF41E);
 
-        assert_eq!(u12::new(0xAFF), cpu.index);
+        assert_eq!(uint::<12>::new(0xAFF), cpu.index);
     }
 
     #[rstest]
@@ -899,23 +909,23 @@ mod tests {
 
         cpu.exec_opcode(0xF429);
 
-        assert_eq!(u12::new(55), cpu.index);
+        assert_eq!(uint::<12>::new(55), cpu.index);
     }
 
     #[rstest]
     fn op_FX33_writes_bcd(window: Box<MockWindow>, mut mmu: Box<MockMmu>, audio: Box<MockAudio>) {
         mmu.expect_write_u8()
-            .with(eq(u12::new(0x100)), eq(2))
+            .with(eq(uint::<12>::new(0x100)), eq(2))
             .returning(|_, _| ());
         mmu.expect_write_u8()
-            .with(eq(u12::new(0x101)), eq(1))
+            .with(eq(uint::<12>::new(0x101)), eq(1))
             .returning(|_, _| ());
         mmu.expect_write_u8()
-            .with(eq(u12::new(0x102)), eq(3))
+            .with(eq(uint::<12>::new(0x102)), eq(3))
             .returning(|_, _| ());
 
         let mut cpu = Cpu::new(mmu, window, audio);
-        cpu.index = u12::new(0x100);
+        cpu.index = uint::<12>::new(0x100);
         cpu.registers[4] = 213;
 
         cpu.exec_opcode(0xF433);
@@ -928,14 +938,14 @@ mod tests {
         audio: Box<MockAudio>,
     ) {
         mmu.expect_write_u8()
-            .with(eq(u12::new(0x100)), eq(0x10))
+            .with(eq(uint::<12>::new(0x100)), eq(0x10))
             .returning(|_, _| ());
         mmu.expect_write_u8()
-            .with(eq(u12::new(0x101)), eq(0x23))
+            .with(eq(uint::<12>::new(0x101)), eq(0x23))
             .returning(|_, _| ());
 
         let mut cpu = Cpu::new(mmu, window, audio);
-        cpu.index = u12::new(0x100);
+        cpu.index = uint::<12>::new(0x100);
         cpu.registers[0] = 0x10;
         cpu.registers[1] = 0x23;
 
@@ -949,15 +959,15 @@ mod tests {
         audio: Box<MockAudio>,
     ) {
         mmu.expect_read_u8()
-            .with(eq(u12::new(0x100)))
+            .with(eq(uint::<12>::new(0x100)))
             .return_const(7);
 
         mmu.expect_read_u8()
-            .with(eq(u12::new(0x101)))
+            .with(eq(uint::<12>::new(0x101)))
             .return_const(8);
 
         let mut cpu = Cpu::new(mmu, window, audio);
-        cpu.index = u12::new(0x100);
+        cpu.index = uint::<12>::new(0x100);
 
         cpu.exec_opcode(0xF165);
 

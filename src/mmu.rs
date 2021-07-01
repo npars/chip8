@@ -1,17 +1,17 @@
+use arbintrary::uint;
 #[cfg(test)]
 use mockall::{automock, predicate::*};
 use std::error::Error;
 use std::fs::File;
 use std::io::Read;
-use ux::u12;
 
 #[cfg_attr(test, automock)]
 pub trait Mmu {
-    fn read_u8(&self, address: u12) -> u8;
-    fn read_u16(&self, address: u12) -> u16;
+    fn read_u8(&self, address: uint<12>) -> u8;
+    fn read_u16(&self, address: uint<12>) -> u16;
 
-    fn write_u8(&mut self, address: u12, data: u8);
-    fn write_u16(&mut self, address: u12, data: u16);
+    fn write_u8(&mut self, address: uint<12>, data: u8);
+    fn write_u16(&mut self, address: uint<12>, data: u16);
 
     fn load_program(&mut self, file_path: &str) -> Result<(), Box<dyn Error>>;
 }
@@ -57,29 +57,25 @@ impl Chip8Mmu {
 
         Chip8Mmu { memory }
     }
-
-    fn to_usize(address: u12) -> usize {
-        u16::from(address) as usize
-    }
 }
 
 impl Mmu for Chip8Mmu {
-    fn read_u8(&self, address: u12) -> u8 {
-        self.memory[Self::to_usize(address)]
+    fn read_u8(&self, address: uint<12>) -> u8 {
+        self.memory[usize::from(address)]
     }
 
-    fn read_u16(&self, address: u12) -> u16 {
-        ((self.memory[Self::to_usize(address)] as u16) << 8)
-            | (self.memory[Self::to_usize(address + u12::new(1))] as u16)
+    fn read_u16(&self, address: uint<12>) -> u16 {
+        ((self.memory[usize::from(address)] as u16) << 8)
+            | (self.memory[usize::from(address + uint::<12>::new(1))] as u16)
     }
 
-    fn write_u8(&mut self, address: u12, data: u8) {
-        self.memory[Self::to_usize(address)] = data;
+    fn write_u8(&mut self, address: uint<12>, data: u8) {
+        self.memory[usize::from(address)] = data;
     }
 
-    fn write_u16(&mut self, address: u12, data: u16) {
-        self.memory[Self::to_usize(address)] = (data >> 8) as u8;
-        self.memory[Self::to_usize(address + u12::new(1))] = data as u8;
+    fn write_u16(&mut self, address: uint<12>, data: u16) {
+        self.memory[usize::from(address)] = (data >> 8) as u8;
+        self.memory[usize::from(address + uint::<12>::new(1))] = data as u8;
     }
 
     fn load_program(&mut self, file_path: &str) -> Result<(), Box<dyn Error>> {
@@ -116,26 +112,26 @@ mod tests {
     #[test]
     fn can_read_u8() {
         let mmu = Chip8Mmu::new();
-        assert_eq!(0x20, mmu.read_u8(u12::new(5))); // First byte of "1" font glyph
+        assert_eq!(0x20, mmu.read_u8(uint::<12>::new(5))); // First byte of "1" font glyph
     }
 
     #[test]
     fn can_read_u16() {
         let mmu = Chip8Mmu::new();
-        assert_eq!(0x2060, mmu.read_u16(u12::new(5))); // First two bytes of "1" font glyph
+        assert_eq!(0x2060, mmu.read_u16(uint::<12>::new(5))); // First two bytes of "1" font glyph
     }
 
     #[test]
     fn can_write_u8() {
         let mut mmu = Chip8Mmu::new();
-        mmu.write_u8(u12::new(0x200), 0xFE);
+        mmu.write_u8(uint::<12>::new(0x200), 0xFE);
         assert_eq!(vec![0xFE], mmu.memory[0x200..0x201]);
     }
 
     #[test]
     fn can_write_u16() {
         let mut mmu = Chip8Mmu::new();
-        mmu.write_u16(u12::new(0x200), 0xFE12);
+        mmu.write_u16(uint::<12>::new(0x200), 0xFE12);
         assert_eq!(vec![0xFE, 0x12], mmu.memory[0x200..0x202]);
     }
 
@@ -143,14 +139,14 @@ mod tests {
     #[should_panic]
     fn panics_on_read_u16_overflow() {
         let mmu = Chip8Mmu::new();
-        mmu.read_u16(u12::new(0xFFF));
+        mmu.read_u16(uint::<12>::new(0xFFF));
     }
 
     #[test]
     #[should_panic]
     fn panics_on_write_u16_overflow() {
         let mut mmu = Chip8Mmu::new();
-        mmu.write_u16(u12::new(0xFFF), 0xFFFF);
+        mmu.write_u16(uint::<12>::new(0xFFF), 0xFFFF);
     }
 
     #[test]

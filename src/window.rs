@@ -64,6 +64,10 @@ impl MiniFbWindow {
             },
         )
         .expect("Unable to open Window");
+
+        // Set update rate to 60fps
+        window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+
         window.update();
         let buffer = vec![0; Self::BUFFER_SIZE];
         MiniFbWindow {
