@@ -1,28 +1,21 @@
 extern crate clap;
-use chip8;
-use clap::{value_t_or_exit, App, Arg};
+
+use clap::Parser;
+
+/// chip8 - A Chip-8 interpreter written in Rust
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// The ch8 binary file to load
+    file: String,
+
+    /// Sets the CPU frequency in hz
+    #[arg(short, long, default_value_t = 500)]
+    freq: u32,
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let matches = App::new("chip8")
-        .arg(
-            Arg::with_name("FREQUENCY")
-                .short("f")
-                .long("freq")
-                .takes_value(true)
-                .default_value("500")
-                .help("Sets the CPU frequency in hz"),
-        )
-        .arg(
-            Arg::with_name("FILE")
-                .help("The ch8 binary file to load")
-                .required(true)
-                .index(1),
-        )
-        .get_matches();
-
-    let frequency = value_t_or_exit!(matches.value_of("FREQUENCY"), u32);
-    let file_path = matches.value_of("FILE").unwrap();
-
-    chip8::run(frequency, file_path).await;
+    let args = Args::parse();
+    chip8::run(args.freq, &args.file).await;
 }

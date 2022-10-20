@@ -9,11 +9,11 @@ edition = "2018"
 [dependencies]
 arbintrary = "0.4.0"
 fastrand = "1.4.0"
-clap = "2.33.3"
+clap = { version = "4.0.17", features = ["derive"] }
 tokio = { version = "1.4.0", features = ["rt", "macros", "time"] }
-minifb = "0.19.3"
-cpal = "0.13.3"
+minifb = "0.23.0"
+cpal = "0.14.0"
 
 [dev-dependencies]
-mockall = "0.9.1"
-rstest = "0.7.0"
+mockall = "0.11.1"
+rstest = "0.15.0"
