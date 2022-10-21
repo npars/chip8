@@ -15,6 +15,7 @@ pub struct Cpu {
     delay_timer: u8,
     sound_timer: u8,
     stack: VecDeque<uint<12>>,
+    key_latch: Option<u8>,
 }
 
 impl Cpu {
@@ -52,6 +53,7 @@ impl Cpu {
             delay_timer: 0,
             sound_timer: 0,
             stack: VecDeque::with_capacity(Cpu::STACK_SIZE),
+            key_latch: None,
         }
     }
 
@@ -310,8 +312,16 @@ impl Cpu {
             0x07 => self.registers[x] = self.delay_timer,
             // A key press is awaited, and then stored in VX.
             0x0A => match self.window.get_pressed_key() {
-                Some(key) => self.registers[x] = key,
-                None => return Some(self.program_counter),
+                Some(key) => {
+                    self.key_latch = Some(key);
+                    return Some(self.program_counter)
+                },
+                None => if let Some(latched_key) = self.key_latch {
+                    self.registers[x] = latched_key;
+                    self.key_latch = None  // Reset the latch now that we are done
+                } else {
+                    return Some(self.program_counter)
+                },
             },
             // Sets the delay timer to VX.
             0x15 => self.delay_timer = self.registers[x],
@@ -844,12 +854,34 @@ mod tests {
         mmu: Box<MockMmu>,
         audio: Box<MockAudio>,
     ) {
-        window.expect_get_pressed_key().returning(|| Some(0x8));
+        window.expect_get_pressed_key().times(1).returning(|| Some(0x8));
+        window.expect_get_pressed_key().times(1).returning(|| None);
         let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0xF40A);
+        assert_eq!(0x0, cpu.registers[4]);  // Sanity check
 
-        assert_eq!(0x8, cpu.registers[4]);
+        cpu.exec_opcode(0xF40A);
+        assert_eq!(0x08, cpu.registers[4]);
+    }
+
+
+    #[rstest]
+    fn op_FX0A_blocks_until_key_is_released(
+        mut window: Box<MockWindow>,
+        mmu: Box<MockMmu>,
+        audio: Box<MockAudio>,
+    ) {
+        window.expect_get_pressed_key().times(1).returning(|| Some(0x8));
+        window.expect_get_pressed_key().times(1).returning(|| None);
+        let mut cpu = Cpu::new(mmu, window, audio);
+
+        // Key is held, wait for release
+        cpu.exec_opcode(0xF40A);
+        assert_eq!(uint::<12>::new(0x200), cpu.program_counter);
+
+        // Key is released, increment program counter
+        cpu.exec_opcode(0xF40A);
         assert_eq!(uint::<12>::new(0x202), cpu.program_counter);
     }
 
