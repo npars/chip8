@@ -182,11 +182,20 @@ impl Cpu {
             // Sets VX to the value of VY.
             0x0 => self.registers[x] = self.registers[y],
             // Sets VX to VX or VY. (Bitwise OR operation)
-            0x1 => self.registers[x] |= self.registers[y],
+            0x1 => {
+                self.registers[x] |= self.registers[y];
+                self.registers[Self::CARRY_REGISTER] = 0;
+            }
             // Sets VX to VX and VY. (Bitwise AND operation)
-            0x2 => self.registers[x] &= self.registers[y],
+            0x2 => {
+                self.registers[x] &= self.registers[y];
+                self.registers[Self::CARRY_REGISTER] = 0;
+            }
             // Sets VX to VX xor VY. (Bitwise XOR operation)
-            0x3 => self.registers[x] ^= self.registers[y],
+            0x3 => {
+                self.registers[x] ^= self.registers[y];
+                self.registers[Self::CARRY_REGISTER] = 0;
+            }
             // Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there isn't.
             0x4 => {
                 let (result, overflow) = self.registers[x].overflowing_add(self.registers[y]);
@@ -314,14 +323,16 @@ impl Cpu {
             0x0A => match self.window.get_pressed_key() {
                 Some(key) => {
                     self.key_latch = Some(key);
-                    return Some(self.program_counter)
-                },
-                None => if let Some(latched_key) = self.key_latch {
-                    self.registers[x] = latched_key;
-                    self.key_latch = None  // Reset the latch now that we are done
-                } else {
-                    return Some(self.program_counter)
-                },
+                    return Some(self.program_counter);
+                }
+                None => {
+                    if let Some(latched_key) = self.key_latch {
+                        self.registers[x] = latched_key;
+                        self.key_latch = None // Reset the latch now that we are done
+                    } else {
+                        return Some(self.program_counter);
+                    }
+                }
             },
             // Sets the delay timer to VX.
             0x15 => self.delay_timer = self.registers[x],
@@ -587,10 +598,12 @@ mod tests {
         let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
+        cpu.registers[Cpu::CARRY_REGISTER] = 1;
 
         cpu.exec_opcode(0x8141);
 
         assert_eq!(0b1111, cpu.registers[1]);
+        assert_eq!(0, cpu.registers[Cpu::CARRY_REGISTER]);
     }
 
     #[rstest]
@@ -598,10 +611,12 @@ mod tests {
         let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
+        cpu.registers[Cpu::CARRY_REGISTER] = 1;
 
         cpu.exec_opcode(0x8142);
 
         assert_eq!(0b1001, cpu.registers[1]);
+        assert_eq!(0, cpu.registers[Cpu::CARRY_REGISTER]);
     }
 
     #[rstest]
@@ -609,10 +624,12 @@ mod tests {
         let mut cpu = Cpu::new(mmu, window, audio);
         cpu.registers[1] = 0b1011;
         cpu.registers[4] = 0b1101;
+        cpu.registers[Cpu::CARRY_REGISTER] = 1;
 
         cpu.exec_opcode(0x8143);
 
         assert_eq!(0b0110, cpu.registers[1]);
+        assert_eq!(0, cpu.registers[Cpu::CARRY_REGISTER]);
     }
 
     #[rstest]
@@ -854,17 +871,19 @@ mod tests {
         mmu: Box<MockMmu>,
         audio: Box<MockAudio>,
     ) {
-        window.expect_get_pressed_key().times(1).returning(|| Some(0x8));
+        window
+            .expect_get_pressed_key()
+            .times(1)
+            .returning(|| Some(0x8));
         window.expect_get_pressed_key().times(1).returning(|| None);
         let mut cpu = Cpu::new(mmu, window, audio);
 
         cpu.exec_opcode(0xF40A);
-        assert_eq!(0x0, cpu.registers[4]);  // Sanity check
+        assert_eq!(0x0, cpu.registers[4]); // Sanity check
 
         cpu.exec_opcode(0xF40A);
         assert_eq!(0x08, cpu.registers[4]);
     }
-
 
     #[rstest]
     fn op_FX0A_blocks_until_key_is_released(
@@ -872,7 +891,10 @@ mod tests {
         mmu: Box<MockMmu>,
         audio: Box<MockAudio>,
     ) {
-        window.expect_get_pressed_key().times(1).returning(|| Some(0x8));
+        window
+            .expect_get_pressed_key()
+            .times(1)
+            .returning(|| Some(0x8));
         window.expect_get_pressed_key().times(1).returning(|| None);
         let mut cpu = Cpu::new(mmu, window, audio);
 
